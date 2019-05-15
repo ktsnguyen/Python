@@ -1,0 +1,120 @@
+#Package used
+import pandas as pd
+import numpy as np
+import seaborn as sns
+from sklearn import linear_model
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LassoCV
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import mean_squared_error
+from math import sqrt
+
+
+#Import data
+train = pd.read_csv("C:/Users/tony/Desktop/New folder/1/train.csv")
+test = pd.read_csv("C:/Users/tony/Desktop/New folder/1/test.csv")
+
+#Outlier Removal
+train = train[(train['1stFlrSF'] < 4000) & (train['LotFrontage'] < 300) & (train['LotArea'] < 100000) & (train['BsmtFinSF1'] < 5000) & (train['BsmtFinSF2'] < 1400) & (train['TotalBsmtSF'] < 6000)]
+
+combined = pd.concat([train,test], sort = False)
+
+#Checking normality
+sns.distplot(train.SalePrice)
+
+#Check for NA
+combined.isna().sum()
+combined.isna().any()
+
+#Removing NAs base on Data Dictionary
+combined['LotFrontage'] = combined.groupby('Neighborhood')['LotFrontage'].transform(lambda x: x.fillna(x.mean()))
+combined['Alley'] = combined['Alley'].fillna("None")
+combined['MSZoning'] = combined['MSZoning'].fillna(combined['MSZoning'].mode()[0])
+combined['LotConfig'] = combined['LotConfig'].fillna(combined['LotConfig'].mode()[0])
+combined['Utilities'] = combined['Utilities'].fillna(combined['Utilities'].mode()[0])
+combined['Exterior1st'] = combined['Exterior1st'].fillna(combined['Exterior1st'].mode()[0])
+combined['Exterior2nd'] = combined['Exterior2nd'].fillna(combined['Exterior2nd'].mode()[0])
+combined['MasVnrType'] = combined['MasVnrType']. fillna(combined['MasVnrType'].mode()[0])
+combined['MasVnrArea'] = combined['MasVnrArea']. fillna(combined['MasVnrArea'].mean())
+combined['KitchenQual'] = combined['KitchenQual']. fillna(combined['KitchenQual'].mode()[0])
+combined['Functional'] = combined['Functional'].fillna(combined['Functional'].mode()[0])
+combined["FireplaceQu"] = combined['FireplaceQu'].fillna("None")
+combined["GarageType"] = combined['GarageType'].fillna("None")
+combined["GarageYrBlt"] = combined['GarageYrBlt'].fillna(combined['GarageYrBlt'].mean())
+combined["GarageFinish"] = combined['GarageFinish'].fillna("None")
+combined["GarageCars"] = combined['GarageCars'].fillna(0)
+combined["GarageArea"] = combined['GarageArea'].fillna(0)
+combined["GarageQual"] = combined['GarageQual'].fillna("None")
+combined["GarageCond"] = combined['GarageCond'].fillna("None")
+combined["BsmtQual"] = combined['BsmtQual'].fillna("None")
+combined["BsmtCond"] = combined['BsmtCond'].fillna("None")
+combined["BsmtExposure"] = combined['BsmtExposure'].fillna("None")
+combined["BsmtFinType1"] = combined['BsmtFinType1'].fillna("None")
+combined["BsmtFinType2"] = combined['BsmtFinType2'].fillna("None")
+combined["BsmtFinSF1"] = combined['BsmtFinSF1'].fillna(0)
+combined["BsmtFinSF2"] = combined['BsmtFinSF2'].fillna(0)
+combined["BsmtUnfSF"] = combined['BsmtUnfSF'].fillna(0)
+combined["TotalBsmtSF"] = combined['TotalBsmtSF'].fillna(0)
+combined["BsmtFullBath"] = combined['BsmtFullBath'].fillna(0)
+combined["BsmtHalfBath"] = combined['BsmtHalfBath'].fillna(0)
+combined['Electrical'] = combined['Electrical']. fillna(combined['Electrical'].mode()[0])
+combined["PoolQC"] = combined['PoolQC'].fillna("None")
+combined["Fence"] = combined['Fence'].fillna("None")
+combined["MiscFeature"] = combined['MiscFeature'].fillna("None")
+combined['SaleType'] = combined['SaleType'].fillna(combined['SaleType'].mode()[0])
+
+#Feature Engineering
+combined['TotalPorchSF'] = combined['OpenPorchSF'] + combined['EnclosedPorch'] + combined['3SsnPorch'] + combined['ScreenPorch']
+combined['HouseAge'] = combined['YrSold'] - combined["YearBuilt"]
+combined['TotalHouseSF'] = combined['1stFlrSF'] + combined['2ndFlrSF'] + combined['TotalBsmtSF']
+combined['ReModAge'] = combined['YearRemodAdd'] - combined['YearBuilt']
+combined['GarageYrBlt'] = combined['GarageYrBlt'].astype(int)
+combined['GarageAge'] = combined['YrSold'] - combined['GarageYrBlt']
+
+#Remove columns that were used in feature engineering to as they're no longer needed from the feature engineering performed above, in addition, I removed GrLivArea as it was mentioned by author to be an outlier
+combined.drop(['OpenPorchSF', 'EnclosedPorch', '3SsnPorch', 'ScreenPorch', 'YrSold', 'YearBuilt', 'GarageYrBlt', 'YearRemodAdd', '1stFlrSF', '2ndFlrSF', 'TotalBsmtSF', 'GrLivArea'], axis = 1, inplace = True)
+
+#Creating dummy variables to prepare for LASSO regression, converting categorical variables into dummies
+combined = pd.get_dummies(combined, sparse = True)
+
+#Split Data back to train and test
+train = combined[0:1197]
+test = combined[1197:]
+
+#Splitting training data to validation
+X_train, X_test, y_train, y_test = train_test_split(train, train['SalePrice'], test_size= 0.3)
+
+#Filling missing values created from splitting
+X_train = X_train.fillna(value = 0)
+X_test = X_test.fillna(value = 0)
+
+#Dropping columns not needed for regression
+X_train.drop(["SalePrice"], axis = 1, inplace = True)
+X_test.drop(["SalePrice"], axis = 1, inplace = True)
+del X_train['Id']
+del X_test['Id']
+test.drop(['SalePrice'], axis = 1, inplace = True)
+del test['Id']
+
+#Normalizing SalesPrice
+y_train = np.log1p(y_train)
+y_test = np.log1p(y_test)
+
+
+#LASSO Regression
+lasso = LassoCV(alphas = [1, 0.1, 0.001, 0.0001], selection = "random", max_iter = 20000)
+lasso.fit(X_train, y_train)
+prediction = lasso.predict(X_test)
+
+#Measure performance based on RMSE
+sqrt(mean_squared_error(np.exp(y_test), np.exp(prediction)))
+
+#Model to real test data
+predict_real = lasso.predict(test)
+
+#Export to CSV
+tocsv = pd.DataFrame(np.exp(predict_real))
+tocsv.to_csv('submit.csv')
+
+#Did things a bit differently than the model I created using R, overall did pretty well, scored ~ 12.567, which is not as good as my R model, but this was just created to practice Python.
+
